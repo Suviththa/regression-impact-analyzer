@@ -1,15 +1,18 @@
+from regression_impact.dependency_analysis import (
+    DependencyAnalysisError,
+    print_dependency_summary,
+    run_dependency_analysis,
+)
 from regression_impact.release_diff import (
     ReleaseDiffError,
     print_comparison_summary,
     print_diff_preview,
     run_release_comparison,
 )
-
 from regression_impact.release_selection import (
     ReleaseSelectionError,
     run_release_selection,
 )
-
 from regression_impact.setup_flow import (
     run_setup,
 )
@@ -41,16 +44,27 @@ def main() -> int:
             comparison
         )
 
+        # STEP 4
+        dependency_result = (
+            run_dependency_analysis(
+                context,
+                comparison,
+            )
+        )
+
+        print_dependency_summary(
+            dependency_result
+        )
+
         # STOP HERE.
         #
-        # Step 4 will use:
+        # Step 5 will use:
         #
-        # comparison.changed_files
         # comparison.diff_text
+        # comparison.changed_files
+        # dependency_result.impacts
         #
-        # together with the current release
-        # source snapshot to perform dependency
-        # analysis.
+        # to collect relevant source context.
 
         return 0
 
@@ -63,6 +77,12 @@ def main() -> int:
     except ReleaseDiffError as exc:
         print(
             f"\nRelease comparison failed: {exc}"
+        )
+        return 1
+
+    except DependencyAnalysisError as exc:
+        print(
+            f"\nDependency analysis failed: {exc}"
         )
         return 1
 
