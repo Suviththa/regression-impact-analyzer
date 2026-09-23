@@ -187,3 +187,65 @@ class GitHubClient:
       page += 1
 
     return tags
+
+  def download_repository_archive(
+    self,
+    owner: str,
+    repository: str,
+    ref: str,
+  ) -> bytes:
+    safe_owner = quote(owner, safe="")
+    safe_repo = quote(repository, safe="")
+    safe_ref = quote(ref, safe="")
+
+    url = (
+      f"{GITHUB_API_BASE}/repos/"
+      f"{safe_owner}/{safe_repo}/zipball/{safe_ref}"
+    )
+
+    request = Request(
+      url=url,
+      headers=self._build_headers(),
+      method="GET",
+    )
+
+    try:
+      with urlopen(request, timeout=60) as response:
+        return response.read()
+
+    except HTTPError as exc:
+      message = "Unable to download repository archive."
+
+      try:
+        body = exc.read().decode("utf-8")
+        data = json.loads(body)
+
+        if isinstance(data, dict):
+          message = data.get("message", message)
+
+      except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+      ):
+        pass
+
+      raise GitHubApiError(
+        status_code=exc.code,
+        message=message,
+      ) from exc
+
+    except URLError as exc:
+      reason = getattr(
+        exc,
+        "reason",
+        "Unknown network error",
+      )
+
+      raise GitHubNetworkError(
+        f"Unable to download repository archive: {reason}"
+      ) from exc
+
+    except TimeoutError as exc:
+      raise GitHubNetworkError(
+        "Repository archive download timed out."
+      ) from exc
