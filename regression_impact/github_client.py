@@ -1,8 +1,8 @@
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -27,6 +27,13 @@ class RepositoryInfo:
   default_branch: str
   html_url: str
 
+@dataclass(frozen=True)
+class RepositoryTag:
+  name: str
+  commit_sha: str
+  zipball_url: str
+  tarball_url: str
+
 class GitHubClient:
   def __init__(self, token: Optional[str] = None):
     self._token = token
@@ -43,7 +50,7 @@ class GitHubClient:
 
     return headers
 
-  def _get_json(self, url: str) -> Dict[str, Any]:
+  def _get_json(self, url: str) -> Any:
     request = Request(
       url=url,
       headers=self._build_headers(),
@@ -127,3 +134,56 @@ class GitHubClient:
         500,
         "GitHub returned an unexpected repository response.",
       ) from exc
+
+  def list_repository_tags(
+    self,
+    owner: str,
+    repository: str,
+  ) -> List[RepositoryTag]:
+    safe_owner = quote(owner, safe="")
+    safe_repo = quote(repository, safe="")
+    tags: List[RepositoryTag] = []
+    per_page = 100
+    page = 1
+
+    while True:
+      query = urlencode({
+        "per_page": per_page,
+        "page": page,
+      })
+      url = (
+        f"{GITHUB_API_BASE}/repos/"
+        f"{safe_owner}/{safe_repo}/tags"
+        f"?{query}"
+      )
+      data = self._get_json(url)
+
+      if not isinstance(data, list):
+        raise GitHubApiError(
+          500,
+          "GitHub returned an unexpected tags response.",
+        )
+
+      for item in data:
+        try:
+          tags.append(
+            RepositoryTag(
+              name=item["name"],
+              commit_sha=item["commit"]["sha"],
+              zipball_url=item["zipball_url"],
+              tarball_url=item["tarball_url"],
+            )
+          )
+        except (KeyError, TypeError) as exc:
+          raise GitHubApiError(
+            500,
+            "GitHub returned malformed tag data.",
+          ) from exc
+
+      # No more pages.
+      if len(data) < per_page:
+        break
+
+      page += 1
+
+    return tags
