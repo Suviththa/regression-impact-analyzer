@@ -70,7 +70,6 @@ def safe_extract_zip(
 
     return directories[0]
 
-
 def discover_source_roots(repository_root: Path, ) -> List[Path]:
     src = repository_root / "src"
 
@@ -78,7 +77,6 @@ def discover_source_roots(repository_root: Path, ) -> List[Path]:
         return [src]
 
     return [repository_root]
-
 
 def file_to_module(
     file_path: Path,
