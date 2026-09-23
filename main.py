@@ -13,77 +13,69 @@ from regression_impact.release_selection import (
     ReleaseSelectionError,
     run_release_selection,
 )
-from regression_impact.setup_flow import (
-    run_setup,
+from regression_impact.setup_flow import run_setup
+from regression_impact.source_context import (
+    SourceContextError,
+    print_source_context_summary,
+    run_source_context_collection,
 )
 
 
 def main() -> int:
-
     try:
-
         # STEP 1
         context = run_setup()
 
         # STEP 2
-        selection = run_release_selection(
-            context
-        )
+        selection = run_release_selection(context)
 
         # STEP 3
-        comparison = run_release_comparison(
-            context,
-            selection,
-        )
-
-        print_comparison_summary(
-            comparison
-        )
-
-        print_diff_preview(
-            comparison
-        )
+        comparison = run_release_comparison(context, selection)
+        print_comparison_summary(comparison)
+        print_diff_preview(comparison)
 
         # STEP 4
-        dependency_result = (
-            run_dependency_analysis(
-                context,
-                comparison,
-            )
-        )
+        dependency_result = run_dependency_analysis(context, comparison)
+        print_dependency_summary(dependency_result)
 
-        print_dependency_summary(
-            dependency_result
+        # STEP 5
+        source_context = run_source_context_collection(
+            context,
+            comparison,
+            dependency_result,
         )
+        print_source_context_summary(source_context)
 
         # STOP HERE.
         #
-        # Step 5 will use:
+        # We now have:
         #
         # comparison.diff_text
-        # comparison.changed_files
-        # dependency_result.impacts
+        # source_context.files
         #
-        # to collect relevant source context.
-
+        # Each source_context file contains:
+        # - path
+        # - why it was selected
+        # - source version
+        # - actual source code
+        #
+        # Do not call an LLM yet.
         return 0
 
     except ReleaseSelectionError as exc:
-        print(
-            f"\nRelease setup failed: {exc}"
-        )
+        print(f"\nRelease setup failed: {exc}")
         return 1
 
     except ReleaseDiffError as exc:
-        print(
-            f"\nRelease comparison failed: {exc}"
-        )
+        print(f"\nRelease comparison failed: {exc}")
         return 1
 
     except DependencyAnalysisError as exc:
-        print(
-            f"\nDependency analysis failed: {exc}"
-        )
+        print(f"\nDependency analysis failed: {exc}")
+        return 1
+
+    except SourceContextError as exc:
+        print(f"\nSource context collection failed: {exc}")
         return 1
 
     except KeyboardInterrupt:
