@@ -19,6 +19,10 @@ from regression_impact.source_context import (
     SourceContextError,
     run_source_context_collection,
 )
+from regression_impact.symbol_analysis import (
+    SymbolAnalysisError,
+    run_symbol_analysis,
+)
 
 
 class ImpactServiceError(Exception):
@@ -109,6 +113,12 @@ def analyze_release_impact(
             selection,
         )
 
+        # Changed symbol analysis
+        changed_symbols = run_symbol_analysis(
+            context,
+            comparison,
+        )
+
         # STEP 4
         dependency_result = run_dependency_analysis(
             context,
@@ -126,6 +136,7 @@ def analyze_release_impact(
         ReleaseDiffError,
         DependencyAnalysisError,
         SourceContextError,
+        SymbolAnalysisError,
     ) as exc:
         raise ImpactServiceError(
             f"Release impact analysis failed: {exc}"
@@ -149,6 +160,15 @@ def analyze_release_impact(
                 "previousPath": changed.previous_path,
             }
             for changed in comparison.changed_files
+        ],
+        "changedSymbols": [
+            {
+                "file": symbol.file,
+                "name": symbol.name,
+                "type": symbol.symbol_type,
+                "changeType": symbol.change_type,
+            }
+            for symbol in changed_symbols
         ],
         "diff": comparison.diff_text,
         "dependencyImpacts": [
@@ -178,4 +198,3 @@ def analyze_release_impact(
             for source_file in source_context.files
         ],
     }
-
