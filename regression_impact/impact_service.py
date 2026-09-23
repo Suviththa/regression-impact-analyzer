@@ -1,8 +1,13 @@
+from dataclasses import replace
 from typing import Optional
 
 from regression_impact.dependency_analysis import (
     DependencyAnalysisError,
     run_dependency_analysis,
+)
+from regression_impact.diff_filter import (
+    DiffFilterError,
+    run_diff_filter,
 )
 from regression_impact.github_client import (
     GitHubApiError,
@@ -27,6 +32,7 @@ from regression_impact.symbol_analysis import (
 
 class ImpactServiceError(Exception):
     pass
+
 
 def analyze_release_impact(
     owner: str,
@@ -113,27 +119,45 @@ def analyze_release_impact(
             selection,
         )
 
-        # Changed symbol analysis
-        changed_symbols = run_symbol_analysis(
+        # STEP 3.5
+        # Remove only safely identifiable noise.
+        diff_filter_result = run_diff_filter(
             context,
             comparison,
+        )
+
+        # Keep the ORIGINAL raw diff, but restrict downstream
+        # file-based analysis to files that survived filtering.
+        analysis_comparison = replace(
+            comparison,
+            changed_files=(
+                diff_filter_result.included_changed_files
+            ),
+        )
+
+        # Changed-symbol detection still uses the raw diff text.
+        # Only the changed-file list has been filtered.
+        changed_symbols = run_symbol_analysis(
+            context,
+            analysis_comparison,
         )
 
         # STEP 4
         dependency_result = run_dependency_analysis(
             context,
-            comparison,
+            analysis_comparison,
         )
 
         # STEP 5
         source_context = run_source_context_collection(
             context,
-            comparison,
+            analysis_comparison,
             dependency_result,
         )
 
     except (
         ReleaseDiffError,
+        DiffFilterError,
         DependencyAnalysisError,
         SourceContextError,
         SymbolAnalysisError,
@@ -141,6 +165,11 @@ def analyze_release_impact(
         raise ImpactServiceError(
             f"Release impact analysis failed: {exc}"
         ) from exc
+
+    filter_decisions = {
+        decision.file: decision
+        for decision in diff_filter_result.decisions
+    }
 
     # Convert our internal Python objects into a JSON-friendly dictionary.
     return {
@@ -158,6 +187,12 @@ def analyze_release_impact(
                 "path": changed.path,
                 "status": changed.status,
                 "previousPath": changed.previous_path,
+                "includedInAnalysis": (
+                    filter_decisions[changed.path].included
+                ),
+                "filterReason": (
+                    filter_decisions[changed.path].reason
+                ),
             }
             for changed in comparison.changed_files
         ],
@@ -170,7 +205,9 @@ def analyze_release_impact(
             }
             for symbol in changed_symbols
         ],
-        "diff": comparison.diff_text,
+        "rawDiff": diff_filter_result.raw_diff,
+        "meaningfulDiff": diff_filter_result.meaningful_diff,
+        "noiseFilter": diff_filter_result.to_dict(),
         "dependencyImpacts": [
             {
                 "changedFile": impact.changed_file,
