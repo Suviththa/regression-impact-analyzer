@@ -3,7 +3,7 @@ import io
 import tempfile
 import zipfile
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from regression_impact.github_client import (
@@ -278,9 +278,6 @@ def analyze_snapshot(
         if not changed.path.endswith(".py"):
             continue
 
-        if changed.status == "removed":
-            continue
-
         changed_module = changed_path_to_module(
             changed.path,
             repository_root,
@@ -319,32 +316,102 @@ def run_dependency_analysis(
     client = GitHubClient(token=context.token)
 
     print("\nDependency Impact Analysis")
-    print(f"Analyzing current release {comparison.current_tag}...")
 
-    try:
-        archive = client.download_repository_archive(
-            owner=repository.owner,
-            repository=repository.name,
-            ref=comparison.current_sha,
+    # Files that still exist in the current release
+    # should be analyzed using the CURRENT graph.
+    current_changes = [
+        changed
+        for changed in comparison.changed_files
+        if changed.status != "removed"
+    ]
+
+    # Removed files no longer exist in the current
+    # release, so their dependencies must be
+    # analyzed from the PREVIOUS release graph.
+    removed_changes = [
+        changed
+        for changed in comparison.changed_files
+        if changed.status == "removed"
+    ]
+
+    all_relationships: List[DependencyEdge] = []
+    all_impacts: List[ChangedModuleImpact] = []
+
+    if current_changes:
+        print(f"Analyzing current release {comparison.current_tag}...")
+
+        try:
+            current_archive = client.download_repository_archive(
+                owner=repository.owner,
+                repository=repository.name,
+                ref=comparison.current_sha,
+            )
+        except (GitHubApiError, GitHubNetworkError) as exc:
+            raise DependencyAnalysisError(
+                f"Unable to download current release snapshot: {exc}"
+            ) from exc
+
+        with tempfile.TemporaryDirectory(
+            prefix="regression-impact-analysis-current-"
+        ) as temp_directory:
+            destination = Path(temp_directory)
+            repository_root = safe_extract_zip(
+                current_archive,
+                destination,
+            )
+
+            current_result = analyze_snapshot(
+                repository_root,
+                replace(
+                    comparison,
+                    changed_files=current_changes,
+                ),
+            )
+
+            all_relationships.extend(current_result.relationships)
+            all_impacts.extend(current_result.impacts)
+
+    if removed_changes:
+        print(
+            f"Analyzing previous release {comparison.previous_tag} "
+            f"for removed files..."
         )
-    except (GitHubApiError, GitHubNetworkError) as exc:
-        raise DependencyAnalysisError(
-            f"Unable to download current release snapshot: {exc}") from exc
 
-    with tempfile.TemporaryDirectory(
-            prefix="regression-impact-analysis-") as temp_directory:
-        destination = Path(temp_directory)
-        repository_root = safe_extract_zip(
-            archive,
-            destination,
-        )
+        try:
+            previous_archive = client.download_repository_archive(
+                owner=repository.owner,
+                repository=repository.name,
+                ref=comparison.previous_sha,
+            )
+        except (GitHubApiError, GitHubNetworkError) as exc:
+            raise DependencyAnalysisError(
+                f"Unable to download previous release snapshot: {exc}"
+            ) from exc
 
-        result = analyze_snapshot(
-            repository_root,
-            comparison,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="regression-impact-analysis-previous-"
+        ) as temp_directory:
+            destination = Path(temp_directory)
+            repository_root = safe_extract_zip(
+                previous_archive,
+                destination,
+            )
 
-    return result
+            previous_result = analyze_snapshot(
+                repository_root,
+                replace(
+                    comparison,
+                    changed_files=removed_changes,
+                ),
+            )
+
+            all_relationships.extend(previous_result.relationships)
+            all_impacts.extend(previous_result.impacts)
+
+    return DependencyAnalysisResult(
+        relationships=all_relationships,
+        impacts=all_impacts,
+    )
 
 
 def print_dependency_summary(result: DependencyAnalysisResult, ) -> None:
