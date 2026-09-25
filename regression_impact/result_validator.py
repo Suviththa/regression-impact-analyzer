@@ -9,6 +9,7 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    field_validator,
 )
 
 
@@ -101,6 +102,37 @@ class ProposedTest(StrictAIModel):
     expectedResult: str = Field(min_length=1)
 
     reason: str = Field(min_length=1)
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def normalize_steps(cls, value):
+        if not isinstance(value, list):
+            return value
+
+        normalized = []
+
+        for step in value:
+            # Already a plain string
+            if isinstance(step, str):
+                normalized.append(step)
+
+            # Copilot Studio structured-output format
+            elif isinstance(step, dict):
+                item = step.get("item")
+
+                if isinstance(item, str):
+                    normalized.append(item)
+                else:
+                    raise ValueError(
+                        "Each step object must contain a string 'item' field"
+                    )
+
+            else:
+                raise ValueError(
+                    "Each step must be either a string or an object containing 'item'"
+                )
+
+        return normalized
 
 
 class RegressionAnalysisCandidate(StrictAIModel):
