@@ -67,7 +67,6 @@ def validate_regression_result(
     try:
         result = validate_and_build_regression_result(
             analysis_result=request.analysisResult,
-            regression_tests=request.regressionTests,
             code_impact_context=request.codeImpactContext,
         )
         return {
